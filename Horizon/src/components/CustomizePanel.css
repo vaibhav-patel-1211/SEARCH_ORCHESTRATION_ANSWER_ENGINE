@@ -1,0 +1,79 @@
+.customize-panel {
+  width: 240px;
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  height: 100%;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    width: 0;
+    opacity: 0;
+  }
+  to {
+    width: 240px;
+    opacity: 1;
+  }
+}
+
+.customize-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  padding: 8px 12px;
+}
+
+.customize-header h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.back-btn {
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.back-btn:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.customize-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.customize-panel .nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s;
+  width: 100%;
+  text-align: left;
+}
+
+.customize-panel .nav-item:hover {
+  background: rgba(0, 0, 0, 0.03);
+  color: var(--text-primary);
+}
+
+.customize-panel .nav-item.active {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text-primary);
+}

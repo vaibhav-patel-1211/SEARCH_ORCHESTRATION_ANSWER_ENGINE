@@ -1,0 +1,130 @@
+.home-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  gap: 48px;
+  animation: fadeIn 0.4s ease-out;
+  background-color: var(--bg-color);
+  min-height: 100%;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.home-header {
+  text-align: center;
+  width: 100%;
+  max-width: 800px;
+}
+
+.greeting {
+  font-size: 40px;
+  font-weight: 500;
+  color: var(--text-primary);
+  letter-spacing: -0.5px;
+}
+
+.input-section {
+  width: 100%;
+  max-width: 800px;
+  display: flex;
+  justify-content: center;
+}
+
+.input-section .input-container {
+  width: 100%;
+  max-width: 800px;
+  border-radius: 16px;
+  padding: 16px;
+  background: #fff;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+}
+
+.input-section .chat-input {
+  width: 100%;
+  min-height: 120px;
+  border: none;
+  resize: none;
+  font-size: 16px;
+  padding: 0;
+  background: transparent;
+  outline: none;
+}
+
+.quick-start-section {
+  max-width: 800px;
+  width: 100%;
+}
+
+.section-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  margin-bottom: 12px;
+}
+
+.quick-start-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.qs-card {
+  background: var(--card-bg);
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  display: flex;
+  gap: 16px;
+  text-align: left;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+  cursor: pointer;
+}
+
+.qs-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  border-color: var(--text-muted);
+  background: #fcfbf8;
+}
+
+.qs-icon {
+  width: 32px;
+  height: 32px;
+  background: #f1f0e8;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.qs-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.qs-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+@media (max-width: 600px) {
+  .quick-start-grid {
+    grid-template-columns: 1fr;
+  }
+  .greeting {
+    font-size: 32px;
+  }
+}

@@ -1,0 +1,259 @@
+.customize-view {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  background-color: var(--bg-color);
+  padding: 80px 20px;
+  overflow-y: auto;
+}
+
+.customize-content {
+  max-width: 700px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+.memory-header {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  text-align: left;
+}
+
+.memory-icon-wrapper {
+  width: 60px;
+  height: 60px;
+  background: #f1f0e8;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.customize-title {
+  font-size: 32px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.customize-subtitle {
+  font-size: 16px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.memory-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settings-card {
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.settings-row {
+  padding: 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+}
+
+.settings-info h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 6px 0;
+}
+
+.settings-info p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.settings-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 0 24px;
+}
+
+.toggle-btn {
+  width: 44px;
+  height: 24px;
+  background: #e5e4da;
+  border-radius: 99px;
+  position: relative;
+  cursor: pointer;
+  border: none;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.toggle-btn.active {
+  background: #000;
+}
+
+.toggle-thumb {
+  width: 18px;
+  height: 18px;
+  background: #fff;
+  border-radius: 50%;
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  transition: transform 0.2s;
+}
+
+.toggle-btn.active .toggle-thumb {
+  transform: translateX(20px);
+}
+
+.secondary-btn {
+  padding: 8px 16px;
+  border: 1px solid var(--border-color);
+  background: #fcfbf8;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--text-primary);
+}
+
+.secondary-btn:hover {
+  background: #f1f0e8;
+}
+
+.memory-count-chip {
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: #fcfbf8;
+}
+
+.danger-btn {
+  padding: 8px 16px;
+  border: 1px solid #fee2e2;
+  background: #fff;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  color: #dc2626;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.danger-btn:hover {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.danger-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.danger-text {
+  color: #dc2626 !important;
+}
+
+.memory-list-card {
+  background: #fff;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 8px 0;
+}
+
+.memory-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+.memory-item-row + .memory-item-row {
+  border-top: 1px solid var(--border-color);
+}
+
+.memory-item-content {
+  min-width: 0;
+}
+
+.memory-item-key {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.memory-item-value {
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.memory-delete-btn {
+  width: 30px;
+  height: 30px;
+  border: 1px solid #fee2e2;
+  border-radius: 8px;
+  background: #fff;
+  color: #dc2626;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.memory-delete-btn:hover {
+  background: #fef2f2;
+}
+
+.memory-empty {
+  margin: 0;
+  padding: 18px 16px;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.memory-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.memory-info-box {
+  background: #f8f7f4;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  gap: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.memory-info-box svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
