@@ -11,19 +11,24 @@
 Unlike standard chatbots, Horizon uses a **state-machine-driven graph** to plan and execute tasks.
 - **Dynamic Planning:** A dedicated planner node analyzes user intent to determine search breadth and retrieval depth.
 - **Conditional Routing:** Automatically routes queries to the most relevant tools (Web Search, Document Retrieval, Coding Sandbox, or Diagram Generator).
+- **Thinking Steps:** Real-time visibility into the agent's reasoning process (query understanding, search planning, source retrieval).
 
 ### 🔍 Advanced RAG & Multi-Document QA
 - **Ingestion Pipeline:** Supports PDF, DOCX, and TXT files with intelligent chunking and metadata extraction.
 - **Vector Search:** Powered by **MongoDB Atlas Vector Search** for high-performance semantic retrieval.
 - **Hybrid Retrieval:** Combines web search (DuckDuckGo) with private document context for grounded answers.
 
-### 💻 Secure Code Execution (E2B)
+### 💾 Long-term Memory & Personalization
+- **User Memory:** Automatically extracts and stores durable facts about the user (preferences, technical stack, architectural decisions) to personalize future interactions.
+- **Custom Skills:** User-definable "skills" that act as specialized system prompts, triggered automatically by keywords or selected manually for specific tasks.
+
+### 💻 Secure Code Execution & Live Preview
 - **Verified Coding:** Generates and executes Python code within a secure **E2B Sandbox**.
-- **Self-Healing Code:** If execution fails, an LLM-based "fixer" node automatically debugs and corrects the code before returning the result.
+- **Live Preview:** Real-time rendering of HTML, CSS, JS, and React code blocks directly within the chat interface, supporting desktop, tablet, and mobile views.
 
 ### 📊 Visual Insights & Reporting
-- **Diagram Generation:** Automatically generates **Mermaid.js** flowcharts and diagrams for logical queries.
-- **PDF Reports:** Exports comprehensive research findings into professionally formatted PDF documents.
+- **Diagram Generation:** Automatically generates **Mermaid.js** flowcharts and logic diagrams, rendered as high-quality PNGs.
+- **PDF Reports:** Exports comprehensive research findings and chat responses into professionally formatted PDF documents.
 
 ### ⚡ Real-time Performance
 - **WebSocket Streaming:** Tokens and tool-call events are streamed in real-time for a low-latency user experience.
@@ -36,15 +41,15 @@ Unlike standard chatbots, Horizon uses a **state-machine-driven graph** to plan 
 ### Backend
 - **Framework:** FastAPI (Python 3.10+)
 - **Orchestration:** LangChain & LangGraph
-- **LLMs:** NVIDIA AI Endpoints, DeepSeek (configurable)
+- **LLMs:** NVIDIA AI Endpoints, DeepSeek, OpenAI (configurable)
 - **Database:** MongoDB Atlas (Vector Store & Session Data)
-- **Sandbox:** E2B Code Interpreter
-- **Auth:** JWT (python-jose) & Bcrypt
+- **Caching:** Redis / Valkey
+- **Sandbox:** E2B Code Interpreter & Playwright (for diagram rendering)
 
 ### Frontend
 - **Framework:** React 19 (Vite)
 - **Styling:** Neo-Brutalist CSS (Bold borders, heavy shadows, high contrast)
-- **Icons:** Lucide React
+- **Live Rendering:** Built-in code sandbox for HTML/JS/React previews
 - **Streaming:** Native WebSockets
 
 ---
@@ -55,7 +60,7 @@ Unlike standard chatbots, Horizon uses a **state-machine-driven graph** to plan 
 - Python 3.10+
 - Node.js & npm
 - MongoDB Atlas Account (Vector Search enabled)
-- API Keys: NVIDIA/OpenAI/DeepSeek, E2B_API_KEY, MONGODB_URI
+- API Keys: NVIDIA/OpenAI/DeepSeek, E2B_API_KEY, MONGO_URI
 
 ### Installation
 
@@ -84,15 +89,16 @@ Unlike standard chatbots, Horizon uses a **state-machine-driven graph** to plan 
 ## 🏗️ System Architecture
 
 Horizon follows a modular graph-based architecture:
-1. **Input:** User query received via WebSocket or REST.
-2. **Planner:** Determines intent (Search vs. RAG vs. Code vs. General).
-3. **Execution Nodes:**
-   - `search_node`: Fetches web data.
-   - `retrieve_chunks`: Queries MongoDB Vector store.
-   - `coding_node`: Runs code in E2B.
-   - `diagram_node`: Generates Mermaid syntax.
-4. **Synthesizer:** Aggregates all data into a final, grounded response.
-5. **Output:** Streamed back to the React UI.
+1. **Input:** User query received via WebSocket with session context (Memory + Skills).
+2. **Pre-processing:** Cache check (Valkey) and session-file detection.
+3. **Planner:** Determines intent (Search vs. RAG vs. Code vs. Diagram) and generates sub-queries.
+4. **Execution Nodes:**
+   - `search_node`: Fetches web data via DuckDuckGo.
+   - `retrieve_node`: Queries MongoDB Vector store for web/document context.
+   - `coding_node`: Runs Python code in E2B sandbox.
+   - `diagram_node`: Generates Mermaid syntax and renders to PNG via Playwright.
+5. **Post-processing:** Answer synthesis, PDF generation, and background memory extraction.
+6. **Output:** Streamed tokens and "thinking" events pushed to the React UI via WebSockets.
 
 ---
 
