@@ -355,7 +355,9 @@ Rules:
 - Do NOT use symbols like *, **, # outside of Markdown code blocks.
 - Add a short summary first, then a deep explanation with code below.
 - Do NOT invent libraries, functions, or APIs that do not exist.
-- Include instructions on how to install dependencies and run the code.
+- Write SELF-CONTAINED, immediately runnable code. Do NOT tell the user to run the code manually — the system will execute it automatically and show the output.
+- If the code needs packages, add `import subprocess; subprocess.run(["pip", "install", "<pkg>"], check=True)` at the top of the script.
+- NEVER write CLI usage instructions or tell the user to run anything. Just write the code.
 - Draw ASCII diagrams if the topic involves architecture or data flow."""
 
 # ---------------- Answer Prompts ----------------
@@ -369,7 +371,7 @@ Rules:
 - CITATION STYLE: Use format [Source URL] or [Number] if URLs are numbered. Prefer [Source URL].
 - If no chunks are provided, answer using your own knowledge and state so.
 - Generate Markdown code as answer that is frontend friendly.
-- If the prompt is technical or coding related, include code and explain how to run it.
+- If the prompt is technical or coding related, include code examples but do NOT tell the user to run them manually.
 - Keep answers clear, accurate and extremely detailed.
 - Provide comprehensive coverage of all sub-topics.
 - Expand on each point with deep technical insights and examples.
@@ -380,6 +382,7 @@ Rules:
 - Write minimum 6-8 page long answer with extensive details.
 - Add a final section titled "Sources & References" with a list of all URLs used.
 - Do NOT invent dates, events, or sources.
+- NEVER mention PDF export, PDF download, or attach any PDF. Do not reference any file download. PDF export is handled separately by the UI.
 """
 
 # ---------------- PDF Prompts ----------------
@@ -394,12 +397,11 @@ CRITICAL CONTENT RULE:
 - Format the content nicely with headings, paragraphs, and lists as appropriate.
 
 CRITICAL IMPORT RULES (DO NOT DEVIATE):
-1. from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, Image
-2. from reportlab.platypus.tableofcontents import TableOfContents
-3. from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-4. from reportlab.lib.pagesizes import A4
-5. from reportlab.lib.units import inch, mm
-6. from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
+1. from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table
+2. from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+3. from reportlab.lib.pagesizes import A4
+4. from reportlab.lib.units import inch
+5. from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
 
 STRICT EXECUTION RULES:
 - Read the content from 'content.txt' using: with open('content.txt', 'r', encoding='utf-8') as f: text = f.read()

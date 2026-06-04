@@ -1,4 +1,4 @@
-import { BrainCircuit, Info, Trash2 } from 'lucide-react'
+import { BrainCircuit, Info, Trash2, Copy, Check } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { chatAPI } from '../services/api'
 import './CustomizeView.css'
@@ -8,7 +8,11 @@ function CustomizeView() {
   const [memories, setMemories] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [isUpdating, setIsUpdating] = useState(false)
+  const [isSavingMemory, setIsSavingMemory] = useState(false)
+  const [newMemoryKey, setNewMemoryKey] = useState('')
+  const [newMemoryValue, setNewMemoryValue] = useState('')
   const [error, setError] = useState('')
+  const [isCopied, setIsCopied] = useState(false)
 
   const loadMemoryState = async () => {
     setIsLoading(true)
@@ -55,12 +59,48 @@ function CustomizeView() {
     }
   }
 
+  const handleAddMemory = async () => {
+    if (isSavingMemory) return
+    const trimmedKey = newMemoryKey.trim()
+    const trimmedValue = newMemoryValue.trim()
+    if (!trimmedKey || !trimmedValue) {
+      setError('Memory section and content are required.')
+      return
+    }
+    setIsSavingMemory(true)
+    setError('')
+    try {
+      const saved = await chatAPI.createMemory(trimmedKey, trimmedValue)
+      setMemories((prev) => {
+        const withoutSaved = prev.filter((item) => item.id !== saved.id && item.key !== saved.key)
+        return [saved, ...withoutSaved]
+      })
+      setNewMemoryKey('')
+      setNewMemoryValue('')
+    } catch (err) {
+      setError(err.message || 'Failed to save memory.')
+    } finally {
+      setIsSavingMemory(false)
+    }
+  }
+
   const handleClearMemory = async () => {
     try {
       await chatAPI.clearMemories()
       setMemories([])
     } catch (err) {
       setError(err.message || 'Failed to clear memory.')
+    }
+  }
+
+  const handleCopyAllMemory = async () => {
+    try {
+      const memoryText = memories.map(m => `${m.key}:\n${m.value}`).join('\n\n')
+      await navigator.clipboard.writeText(memoryText)
+      setIsCopied(true)
+      setTimeout(() => setIsCopied(false), 2000)
+    } catch (err) {
+      setError('Failed to copy memory to clipboard.')
     }
   }
 
@@ -107,6 +147,24 @@ function CustomizeView() {
 
             <div className="settings-row">
               <div className="settings-info">
+                <h3>Export Memory</h3>
+                <p>Copy all memories to your clipboard to share with another AI.</p>
+              </div>
+              <button 
+                className="secondary-btn" 
+                onClick={handleCopyAllMemory} 
+                disabled={memories.length === 0}
+                style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+              >
+                {isCopied ? <Check size={16} /> : <Copy size={16} />}
+                {isCopied ? 'Copied!' : 'Copy All'}
+              </button>
+            </div>
+
+            <div className="settings-divider" />
+
+            <div className="settings-row">
+              <div className="settings-info">
                 <h3 className="danger-text">Clear all memories</h3>
                 <p>This will permanently delete everything Horizon has learned about you across all conversations.</p>
               </div>
@@ -118,6 +176,39 @@ function CustomizeView() {
           </div>
 
           <div className="memory-list-card">
+            <div className="memory-add-row">
+              <div className="memory-add-fields">
+                <input
+                  className="memory-input"
+                  type="text"
+                  placeholder="Section (e.g., preferred_stack)"
+                  value={newMemoryKey}
+                  onChange={(event) => setNewMemoryKey(event.target.value)}
+                  disabled={!memoryEnabled || isSavingMemory}
+                />
+                <input
+                  className="memory-input"
+                  type="text"
+                  placeholder="Content (e.g., React + FastAPI)"
+                  value={newMemoryValue}
+                  onChange={(event) => setNewMemoryValue(event.target.value)}
+                  disabled={!memoryEnabled || isSavingMemory}
+                />
+              </div>
+              <button
+                className="secondary-btn"
+                onClick={handleAddMemory}
+                disabled={
+                  !memoryEnabled ||
+                  isSavingMemory ||
+                  !newMemoryKey.trim() ||
+                  !newMemoryValue.trim()
+                }
+              >
+                Save
+              </button>
+            </div>
+
             {isLoading ? (
               <p className="memory-empty">Loading memories...</p>
             ) : memories.length === 0 ? (

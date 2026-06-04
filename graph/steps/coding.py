@@ -1,3 +1,15 @@
+"""
+coding.py - Secure code generation and execution node.
+Flow:
+  1. LLM generates Python code based on user's prompt
+  2. Code is extracted from markdown response
+  3. Each Python block is executed in an E2B sandbox (isolated container)
+  4. If execution fails, LLM auto-fixes the code (up to 3 attempts)
+  5. Final answer includes execution results (pass/fail + output)
+
+This gives users verified, working code rather than untested suggestions.
+"""
+
 import asyncio
 import inspect
 import re
@@ -8,19 +20,14 @@ from langchain_core.output_parsers import StrOutputParser
 from prompts.prompts import coding_system_prompt
 
 MAX_FIX_ATTEMPTS = 3  # max times LLM tries to fix broken code
-EXECUTION_TRIGGER_RE = re.compile(
-    r"\b(run|execute|test|debug|traceback|stack\s*trace|fix\s+error|verify|validate|failing|exception)\b",
-    re.IGNORECASE,
-)
 
 
 # ---------------- PRE-PROCESSING ----------------
 
 def strip_think_tags(text: str) -> str:
     """
-    Remove <think>...</think> reasoning blocks that NVIDIA/DeepSeek
-    models inject into responses. These blocks can contain backtick
-    patterns that break code extraction.
+    Remove <think>...</think> reasoning blocks that some models
+    inject into responses. These break code extraction.
     """
     return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
@@ -29,11 +36,10 @@ def strip_think_tags(text: str) -> str:
 
 def extract_all_code_blocks(markdown: str) -> list[dict]:
     """
-    Robust line-by-line extraction.
-    Defaults to 'text' if no language is specified to prevent 
-    execution of unlabeled math/diagram blocks.
+    Parse markdown and extract all fenced code blocks.
+    Returns list of {language, code} dicts.
+    Handles edge cases like unclosed blocks (stream cut off mid-response).
     """
-    # Always strip think tags first
     markdown = strip_think_tags(markdown)
 
     results       = []
@@ -45,19 +51,17 @@ def extract_all_code_blocks(markdown: str) -> list[dict]:
 
     for line in lines:
         if not in_block:
-            # Opening fence must be at column 0 (no leading spaces/tabs)
+            # Detect opening fence (``` or ```python etc.)
             match = re.match(r"^(```+)(\w*)\s*$", line)
             if match:
-                fence         = match.group(1)       # e.g. "```"
-                # CHANGED: Default to 'text' instead of 'python'
+                fence         = match.group(1)
                 current_lang  = match.group(2).lower() or "text"
                 current_lines = []
                 in_block      = True
         else:
-            # Close only when the EXACT fence appears alone at column 0
-            # Indented backticks inside docstrings will NOT match this
+            # Detect closing fence (must match exactly)
             if line.rstrip() == fence:
-                if current_lines:                    # ignore empty blocks
+                if current_lines:
                     results.append({
                         "language": current_lang,
                         "code": "\n".join(current_lines).strip()
@@ -69,7 +73,7 @@ def extract_all_code_blocks(markdown: str) -> list[dict]:
             else:
                 current_lines.append(line)
 
-    # ── Handle truncated / unclosed block (stream cut off mid-response) ──
+    # Handle truncated/unclosed block (stream cut off mid-response)
     if in_block and current_lines:
         print("⚠ Unclosed code block detected (stream truncated) — capturing anyway.")
         results.append({
@@ -89,36 +93,28 @@ def extract_first_python_block(markdown: str) -> str | None:
     return None
 
 
-def should_verify_code(user_prompt: str) -> bool:
-    """
-    Sandbox verification is expensive. Enable only when user explicitly asks
-    to run/test/debug code, otherwise return answer immediately for low latency.
-    """
-    return bool(EXECUTION_TRIGGER_RE.search(user_prompt or ""))
 
 
 # ---------------- SANDBOX EXECUTION ----------------
 
 def run_in_sandbox(code: str, sandbox=None) -> dict:
     """
-    Execute Python code in an E2B sandbox.
-    If sandbox is provided, uses that instance (stateful).
-    Otherwise creates a temporary one.
+    Execute Python code in an E2B cloud sandbox (isolated container).
+    This is safe - user code can't affect our server.
+    Returns {success: bool, output: str, error: str|None}
     """
     try:
-        # Check for pip install commands in the code
-        if "pip install" in code:
-            # Handle both !pip and pip
-            packages = re.findall(r"(?:!pip|pip)\s+install\s+([\w\-\s]+)", code)
-            for pkg_str in packages:
-                # Split by space if multiple packages on one line
-                for pkg in pkg_str.split():
+        # Auto-install any pip packages referenced in the code
+        pip_patterns = re.findall(
+            r'(?:!pip|pip|subprocess\.run\(\[.?pip.?,\s*.?install.?,\s*)install\s+([\w\-]+)',
+            code
+        )
+        if pip_patterns and sandbox:
+            for pkg in pip_patterns:
+                pkg = pkg.strip().strip('"').strip("'")
+                if pkg:
                     print(f"   📦 Installing package: {pkg}...")
-                    if sandbox:
-                        sandbox.commands.run(f"pip install {pkg}")
-                    else:
-                        with Sandbox.create() as tmp_sbx:
-                            tmp_sbx.commands.run(f"pip install {pkg}")
+                    sandbox.commands.run(f"pip install {pkg}")
 
         if sandbox:
             result = sandbox.run_code(code, timeout=60)
@@ -136,6 +132,7 @@ def run_in_sandbox(code: str, sandbox=None) -> dict:
         }
 
 def format_sandbox_result(result) -> dict:
+    """Convert E2B sandbox result into our standard format."""
     stdout = "".join(result.logs.stdout or [])
     stderr = "".join(result.logs.stderr or [])
 
@@ -164,8 +161,8 @@ def format_sandbox_result(result) -> dict:
 
 def fix_code_with_llm(original_prompt: str, broken_code: str, error: str) -> str:
     """
-    Ask the LLM to repair broken code given the real traceback from E2B.
-    Returns only the fixed code string (no markdown, no explanation).
+    Self-healing: sends broken code + error traceback to LLM,
+    asks it to fix the bugs. Returns corrected code.
     """
     fix_prompt = ChatPromptTemplate.from_messages([
         (
@@ -202,7 +199,6 @@ Return the fixed code now:"""
         "error":           error
     })
 
-    # Strip think tags from fixer response too
     response = strip_think_tags(response)
     fixed    = extract_first_python_block(response)
     return fixed if fixed else broken_code   # fallback: return original if parse fails
@@ -215,11 +211,16 @@ def _verify_and_annotate_code(
     clean_answer: str,
     python_blocks: list[dict],
 ) -> str:
+    """
+    Takes all Python blocks from the LLM response, executes each in sandbox,
+    auto-fixes failures, and appends execution results to the answer.
+    """
     execution_results = []
 
     final_answer = clean_answer
 
     try:
+        # Create one sandbox session for all blocks (preserves state between them)
         with Sandbox.create() as sbx:
             for block_num, block in enumerate(python_blocks, 1):
                 code = block["code"]
@@ -227,6 +228,7 @@ def _verify_and_annotate_code(
                 last_error = None
                 fixed = False
 
+                # Try-fix loop: execute, if fails -> fix -> retry
                 while attempt < MAX_FIX_ATTEMPTS:
                     attempt += 1
                     result = run_in_sandbox(code, sandbox=sbx)
@@ -250,6 +252,7 @@ def _verify_and_annotate_code(
                         code = fix_code_with_llm(user_prompt, code, last_error)
                         fixed = True
                 else:
+                    # All attempts exhausted - mark as failed
                     execution_results.append(
                         {
                             "block_num": block_num,
@@ -266,6 +269,7 @@ def _verify_and_annotate_code(
         if not execution_results:
             return f"{clean_answer}\n\nExecution verification failed: {exc}"
 
+    # Replace broken code blocks with fixed versions in the answer
     for res in execution_results:
         if res["fixed"] and res["status"] == "success":
             old_block = f"```python\n{res['original']}\n```"
@@ -273,6 +277,7 @@ def _verify_and_annotate_code(
             if old_block in final_answer:
                 final_answer = final_answer.replace(old_block, new_block, 1)
 
+    # Append execution results section at the end
     exec_section = "\n\n---\n## Execution Results\n\n"
 
     for res in execution_results:
@@ -295,8 +300,16 @@ def _verify_and_annotate_code(
 
 
 async def coding_node(state, config=None):
+    """
+    Graph node entry point for coding queries.
+    1. Streams LLM response (code + explanation)
+    2. Extracts Python blocks
+    3. Verifies each block in E2B sandbox
+    4. Returns final answer with execution results
+    """
     user_prompt = state["prompt"]
     memory_context = (state.get("memory_context") or "").strip()
+    skill_context = (state.get("skill_context") or "").strip()
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", coding_system_prompt),
@@ -307,6 +320,9 @@ async def coding_node(state, config=None):
 Private User Memory Context (for personalization only):
 {memory_context}
 
+Active Skill Instructions (apply when relevant):
+{skill_context}
+
 Write a complete, working solution with inline comments.
 Explain each section clearly after the code.
 Mention alternative approaches or libraries if relevant."""
@@ -316,11 +332,13 @@ Mention alternative approaches or libraries if relevant."""
     formatted = prompt.format_messages(
         prompt=user_prompt,
         memory_context=memory_context or "No user memory available.",
+        skill_context=skill_context or "No active skills.",
     )
     chain = coding_model | StrOutputParser()
     configurable = config.get("configurable", {}) if isinstance(config, dict) else {}
     token_callback = configurable.get("token_callback")
 
+    # Stream tokens to frontend in real-time
     llm_answer = ""
     async for token in chain.astream(formatted):
         if not token:
@@ -335,12 +353,11 @@ Mention alternative approaches or libraries if relevant."""
     all_blocks = extract_all_code_blocks(clean_answer)
     python_blocks = [b for b in all_blocks if b["language"] in ("python", "py")]
 
+    # If no Python code found, just return the explanation as-is
     if not python_blocks:
         return {"final_answer": clean_answer}
 
-    if not should_verify_code(user_prompt):
-        return {"final_answer": clean_answer}
-
+    # Run verification in a thread (sandbox calls are blocking)
     verified_answer = await asyncio.to_thread(
         _verify_and_annotate_code,
         user_prompt,

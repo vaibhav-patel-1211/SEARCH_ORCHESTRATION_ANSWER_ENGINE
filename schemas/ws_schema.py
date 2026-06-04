@@ -13,6 +13,7 @@ class ChatWebSocketRequest(BaseModel):
     research_enabled: bool = False
     session_id: str | None = None
     create_new_session: bool = False
+    skill_id: str | None = None
 
     @model_validator(mode="after")
     def normalize_query(self) -> "ChatWebSocketRequest":

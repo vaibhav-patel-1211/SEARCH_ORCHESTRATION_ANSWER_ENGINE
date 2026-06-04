@@ -17,7 +17,7 @@ export const buildPromptCommand = (
 }
 
 const COMMAND_REGEX = /\/([a-zA-Z0-9_]+):\[(.*?)\]/g
-const PLACEHOLDER_REGEX = /\[([A-Z][A-Z0-9_]{1,49})\]/g
+const PLACEHOLDER_REGEX = /\[([^\]]+)\]/g
 
 export const expandPromptCommands = (input, savedPrompts = []) => {
   if (typeof input !== 'string' || !input) return input ?? ''

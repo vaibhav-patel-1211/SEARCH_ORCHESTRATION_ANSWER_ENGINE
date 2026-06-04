@@ -1,3 +1,15 @@
+"""
+streaming.py - Maps raw LangGraph events into WebSocket-friendly event types.
+The frontend receives these structured events to update the UI in real-time:
+  - TokenEvent: individual tokens for streaming text
+  - ToolCallEvent: planner decisions, search progress, skill matches
+  - RetrievalEvent: list of retrieved documents with metadata
+  - FinalAnswerEvent: complete answer + metadata (sent at the end)
+
+This module acts as a translator between LangGraph's internal event format
+and our frontend WebSocket protocol.
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -5,12 +17,18 @@ from urllib.parse import urlparse
 
 from schemas.ws_schema import RetrievedDocument, RetrievalEvent, TokenEvent, ToolCallEvent
 
+# Nodes that produce the final streamed answer
 FINAL_ANSWER_NODES = {"answer_node", "general_answer_node", "coding_node"}
+
+# LangGraph event names that contain streaming tokens
 TOKEN_EVENT_NAMES = {"on_chat_model_stream", "on_llm_stream"}
+
+# State keys we want to extract from completed events
 FINAL_STATE_KEYS = {"final_answer", "intent", "diagram_svg", "pdf_filename", "cache_hit"}
 
 
 def _extract_node_name(event: dict[str, Any]) -> str | None:
+    """Figure out which graph node produced this event."""
     metadata = event.get("metadata")
     if isinstance(metadata, dict):
         node = metadata.get("langgraph_node")
@@ -28,6 +46,7 @@ def _extract_node_name(event: dict[str, Any]) -> str | None:
 
 
 def _extract_output(event: dict[str, Any], node_name: str | None) -> dict[str, Any]:
+    """Extract the output dict from a chain_end event."""
     data = event.get("data")
     if not isinstance(data, dict):
         return {}
@@ -36,6 +55,7 @@ def _extract_output(event: dict[str, Any], node_name: str | None) -> dict[str, A
     if not isinstance(output, dict):
         return {}
 
+    # Sometimes output is nested under the node name
     if node_name and node_name in output and isinstance(output[node_name], dict):
         return output[node_name]
 
@@ -43,6 +63,7 @@ def _extract_output(event: dict[str, Any], node_name: str | None) -> dict[str, A
 
 
 def _extract_text(chunk: Any) -> str:
+    """Safely extract text content from various chunk formats."""
     if isinstance(chunk, str):
         return chunk
 
@@ -72,6 +93,7 @@ def _extract_text(chunk: Any) -> str:
 
 
 def _extract_stream_token(event: dict[str, Any]) -> str:
+    """Get the token string from a streaming event."""
     data = event.get("data")
     if not isinstance(data, dict):
         return ""
@@ -79,6 +101,7 @@ def _extract_stream_token(event: dict[str, Any]) -> str:
 
 
 def _normalize_documents(raw_documents: Any) -> list[RetrievedDocument]:
+    """Convert raw document dicts into clean RetrievedDocument objects for the frontend."""
     if not isinstance(raw_documents, list):
         return []
 
@@ -103,14 +126,20 @@ def _normalize_documents(raw_documents: Any) -> list[RetrievedDocument]:
 
 
 def map_langgraph_event(event: dict[str, Any]) -> list[TokenEvent | ToolCallEvent | RetrievalEvent]:
+    """
+    Main mapping function. Takes a raw LangGraph event and returns
+    zero or more WebSocket events to send to the frontend.
+    """
     node_name = _extract_node_name(event)
     event_name = event.get("event")
 
+    # Streaming tokens from answer nodes -> TokenEvent
     if event_name in TOKEN_EVENT_NAMES and node_name in FINAL_ANSWER_NODES:
         token = _extract_stream_token(event)
         if token:
             return [TokenEvent(content=token)]
 
+    # Only process chain_end events for tool calls and retrieval
     if event_name != "on_chain_end":
         return []
 
@@ -118,6 +147,7 @@ def map_langgraph_event(event: dict[str, Any]) -> list[TokenEvent | ToolCallEven
     if not output:
         return []
 
+    # Planner completed -> send planning info to frontend
     if node_name == "planner_node":
         plan_payload = {
             "intent": output.get("intent"),
@@ -135,6 +165,7 @@ def map_langgraph_event(event: dict[str, Any]) -> list[TokenEvent | ToolCallEven
             )
         ]
 
+        # Also emit search_queries event if sub-queries were generated
         queries = output.get("sub_queries")
         if isinstance(queries, list) and queries:
             events.append(
@@ -146,6 +177,7 @@ def map_langgraph_event(event: dict[str, Any]) -> list[TokenEvent | ToolCallEven
             )
         return events
 
+    # Search completed -> send URL count info
     if node_name == "search_node":
         search_results = output.get("search_results")
         if isinstance(search_results, list):
@@ -173,8 +205,15 @@ def map_langgraph_event(event: dict[str, Any]) -> list[TokenEvent | ToolCallEven
                 )
             ]
 
+    # Document intent routing decision
     if node_name == "document_intent_node":
         route_source = output.get("route_source")
+        reason = output.get("document_query_reason")
+        
+        # Suppress noisy event if there are no files
+        if reason == "No uploaded files are associated with this session.":
+            return []
+
         if isinstance(route_source, str):
             return [
                 ToolCallEvent(
@@ -182,12 +221,13 @@ def map_langgraph_event(event: dict[str, Any]) -> list[TokenEvent | ToolCallEven
                     status="selected",
                     payload={
                         "route_source": route_source,
-                        "reason": output.get("document_query_reason"),
+                        "reason": reason,
                         "confidence": output.get("document_query_confidence"),
                     },
                 )
             ]
 
+    # Retrieval completed -> send document list to frontend
     if node_name in {"retrieve_node", "document_retrieve_node", "hybrid_retrieve_node"}:
         documents = _normalize_documents(output.get("retrieved_documents"))
         if documents:
@@ -197,6 +237,10 @@ def map_langgraph_event(event: dict[str, Any]) -> list[TokenEvent | ToolCallEven
 
 
 def extract_state_updates(event: dict[str, Any]) -> dict[str, Any]:
+    """
+    Extract final state values (answer, intent, etc.) from chain_end events.
+    Used to build the FinalAnswerEvent at the end of streaming.
+    """
     if event.get("event") != "on_chain_end":
         return {}
 
@@ -206,4 +250,3 @@ def extract_state_updates(event: dict[str, Any]) -> dict[str, Any]:
         return {}
 
     return {key: output[key] for key in FINAL_STATE_KEYS if key in output}
-

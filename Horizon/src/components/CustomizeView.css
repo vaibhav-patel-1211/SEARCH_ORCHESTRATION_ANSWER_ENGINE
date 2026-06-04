@@ -180,6 +180,37 @@
   padding: 8px 0;
 }
 
+.memory-add-row {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  align-items: center;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.memory-add-fields {
+  flex: 1;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.memory-input {
+  flex: 1;
+  min-width: 180px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 14px;
+  color: var(--text-primary);
+  background: #fcfbf8;
+}
+
+.memory-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .memory-item-row {
   display: flex;
   align-items: center;

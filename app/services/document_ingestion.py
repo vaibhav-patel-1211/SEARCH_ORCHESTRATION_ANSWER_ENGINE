@@ -1,3 +1,17 @@
+"""
+document_ingestion.py - Handles file upload and processing pipeline.
+Supports PDF, DOCX, and TXT files.
+Flow:
+  1. Read and extract text from uploaded file
+  2. Split text into chunks (1200 chars with 200 overlap)
+  3. Generate embeddings for each chunk
+  4. Store chunks + embeddings in MongoDB Atlas (for vector search)
+  5. Save file metadata to local DB
+  6. Save original file to static/uploads/
+
+Also provides functions to retrieve file content and delete uploaded files.
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -18,11 +32,14 @@ from database.cloud.mongo_atlas_setup import uploaded_document_chunks
 from database.local.client import add_uploaded_file_metadata, delete_uploaded_file_metadata
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt"}
-CHUNK_SIZE = 1200
-CHUNK_OVERLAP = 200
+CHUNK_SIZE = 1200       # characters per chunk
+CHUNK_OVERLAP = 200     # overlap between consecutive chunks (preserves context)
 
+
+# ── Text extraction functions (one per file type) ──
 
 def _read_pages_from_pdf(file_bytes: bytes) -> list[str]:
+    """Extract text from each page of a PDF separately (preserves page numbers)."""
     reader = PdfReader(io.BytesIO(file_bytes))
     return [(page.extract_text() or "").strip() for page in reader.pages]
 
@@ -33,6 +50,7 @@ def _read_text_from_pdf(file_bytes: bytes) -> str:
 
 
 def _read_text_from_docx(file_bytes: bytes) -> str:
+    """Extract text from DOCX by reading all paragraphs."""
     document = Document(io.BytesIO(file_bytes))
     lines = [para.text.strip() for para in document.paragraphs if para.text.strip()]
     return "\n".join(lines).strip()
@@ -43,6 +61,7 @@ def _read_text_from_txt(file_bytes: bytes) -> str:
 
 
 def _extract_text(filename: str, file_bytes: bytes) -> str:
+    """Route to the correct extractor based on file extension."""
     extension = os.path.splitext(filename.lower())[1]
     if extension == ".pdf":
         return _read_text_from_pdf(file_bytes)
@@ -57,6 +76,7 @@ def _extract_text(filename: str, file_bytes: bytes) -> str:
 
 
 def _chunk_text(text: str) -> list[str]:
+    """Split text into overlapping chunks using LangChain's recursive splitter."""
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
@@ -74,10 +94,12 @@ def _build_chunk_documents(
     chunks: list[dict],
     embeddings: list[list[float]],
 ) -> list[dict]:
+    """Build MongoDB documents for each chunk (with embedding vector)."""
     records: list[dict] = []
     for index, (chunk_item, vector) in enumerate(zip(chunks, embeddings)):
         chunk = str(chunk_item.get("text") or "").strip()
         page_number = chunk_item.get("page_number")
+        # Use MD5 of file_id + index + text as unique chunk ID
         chunk_id = hashlib.md5(f"{file_id}:{index}:{chunk}".encode("utf-8")).hexdigest()
         payload = {
             "_id": chunk_id,
@@ -98,6 +120,10 @@ def _build_chunk_documents(
 
 
 def _merge_chunk_sequence(chunks: list[str]) -> str:
+    """
+    Merge overlapping chunks back into continuous text.
+    Detects overlap between consecutive chunks and removes duplicated portions.
+    """
     if not chunks:
         return ""
 
@@ -107,6 +133,7 @@ def _merge_chunk_sequence(chunks: list[str]) -> str:
         if not candidate:
             continue
 
+        # Find the longest suffix of merged that matches a prefix of candidate
         max_overlap = min(len(merged), len(candidate), CHUNK_OVERLAP * 2)
         overlap = 0
         for size in range(max_overlap, 0, -1):
@@ -119,12 +146,18 @@ def _merge_chunk_sequence(chunks: list[str]) -> str:
     return merged.strip()
 
 
+# ── Main ingestion function ──
+
 async def ingest_uploaded_file(
     *,
     uploaded_file: UploadFile,
     session_id: str,
     user_id: str,
 ) -> dict:
+    """
+    Full ingestion pipeline for a single file:
+    validate -> extract text -> chunk -> embed -> store in MongoDB -> save metadata
+    """
     filename = (uploaded_file.filename or "").strip()
     if not filename:
         raise HTTPException(
@@ -146,6 +179,7 @@ async def ingest_uploaded_file(
             detail=f"Uploaded file '{filename}' is empty.",
         )
 
+    # Extract and chunk the text (PDFs preserve page numbers)
     chunks: list[dict] = []
 
     if extension == ".pdf":
@@ -174,6 +208,7 @@ async def ingest_uploaded_file(
             detail=f"No usable text chunks extracted from '{filename}'.",
         )
 
+    # Generate embeddings for all chunks (batch operation)
     chunk_texts = [str(item.get("text") or "") for item in chunks]
     embeddings = await asyncio.to_thread(embedding_model.embed_documents, chunk_texts)
     if not embeddings:
@@ -185,13 +220,14 @@ async def ingest_uploaded_file(
     file_id = uuid4().hex
     upload_timestamp = datetime.utcnow()
 
-    # Save original file to static/uploads
+    # Save original file to disk (for preview/download later)
     static_uploads_dir = os.path.join("static", "uploads")
     os.makedirs(static_uploads_dir, exist_ok=True)
     file_path = f"static/uploads/{file_id}{extension}"
     with open(file_path, "wb") as f:
         f.write(file_bytes)
 
+    # Store chunks with embeddings in MongoDB Atlas (for vector search)
     records = _build_chunk_documents(
         file_id=file_id,
         filename=filename,
@@ -205,8 +241,9 @@ async def ingest_uploaded_file(
     try:
         uploaded_document_chunks.insert_many(records, ordered=False)
     except BulkWriteError:
-        pass
+        pass  # ignore duplicate key errors (idempotent)
 
+    # Save metadata to local DB (for listing files in UI)
     metadata = {
         "file_id": file_id,
         "filename": filename,
@@ -224,6 +261,7 @@ async def ingest_uploaded_files(
     session_id: str,
     user_id: str,
 ) -> list[dict]:
+    """Process multiple files sequentially."""
     ingested: list[dict] = []
     for uploaded_file in uploaded_files:
         ingested.append(
@@ -242,7 +280,7 @@ async def delete_uploaded_file(
     user_id: str,
     session_id: str | None = None,
 ) -> bool:
-    # Get metadata to find file_path
+    """Delete file from disk, metadata DB, and vector store."""
     from database.local.client import get_db
     db = get_db()
     metadata = await db.uploaded_files.find_one({"file_id": file_id, "user_id": user_id})
@@ -259,6 +297,7 @@ async def delete_uploaded_file(
         session_id=session_id,
     )
 
+    # Remove chunks from MongoDB Atlas vector store
     delete_filter = {"file_id": file_id, "user_id": user_id}
     if session_id:
         delete_filter["session_id"] = session_id
@@ -273,6 +312,7 @@ def _load_uploaded_file_chunks(
     user_id: str,
     session_id: str | None = None,
 ) -> list[dict]:
+    """Load all chunks for a file from MongoDB (sorted by chunk_index)."""
     query = {"file_id": file_id, "user_id": user_id}
     if session_id:
         query["session_id"] = session_id
@@ -299,6 +339,10 @@ async def get_uploaded_file_content(
     user_id: str,
     session_id: str | None = None,
 ) -> dict | None:
+    """
+    Reconstruct the full file content from stored chunks.
+    For PDFs, groups chunks by page number and merges overlapping text.
+    """
     chunks = await asyncio.to_thread(
         _load_uploaded_file_chunks,
         file_id=file_id,
@@ -306,7 +350,6 @@ async def get_uploaded_file_content(
         session_id=session_id,
     )
     if not chunks:
-        # Fallback to check metadata if chunks are missing (unlikely but safe)
         from database.local.client import get_db
         db = get_db()
         metadata = await db.uploaded_files.find_one({"file_id": file_id, "user_id": user_id})
@@ -327,12 +370,12 @@ async def get_uploaded_file_content(
     resolved_session_id = str(chunks[0].get("session_id") or session_id or "")
     extension = os.path.splitext(filename.lower())[1]
 
-    # Load metadata to get file_path
     from database.local.client import get_db
     db = get_db()
     metadata = await db.uploaded_files.find_one({"file_id": file_id, "user_id": user_id})
     file_path = metadata.get("file_path") if metadata else None
 
+    # For PDFs, reconstruct page-by-page
     pages: list[dict] = []
     if extension == ".pdf":
         page_map: dict[int, list[str]] = {}
@@ -367,4 +410,3 @@ async def get_uploaded_file_content(
         "pages": pages,
         "file_path": file_path,
     }
-
