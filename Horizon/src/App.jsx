@@ -1,3 +1,19 @@
+/**
+ * App.jsx - Root component of the Horizon frontend.
+ *
+ * Manages the entire application state including:
+ * - Authentication (login/signup flow)
+ * - Chat sessions (create, switch, delete)
+ * - WebSocket connection for real-time streaming
+ * - File uploads and document management
+ * - View routing (home, chat, skills, optimizer, prompts)
+ * - Toast notifications
+ *
+ * The WebSocket connection (wsRef) is the primary communication channel
+ * with the backend. Messages are sent as JSON and responses stream back
+ * as events (tokens, tool calls, final answer).
+ */
+
 import { useEffect, useRef, useState } from 'react'
 import Sidebar from './components/Sidebar'
 import CustomizePanel from './components/CustomizePanel'
@@ -15,19 +31,21 @@ import { buildPromptCommand, expandPromptCommands, toPromptCommandKey } from './
 import { Check, Info } from 'lucide-react'
 import './App.css'
 
+// If user pastes text longer than this, treat it as "attached content" rather than inline input
 const LONG_PASTE_THRESHOLD = 220
 
 function App() {
+  // --- Core app state ---
   const [isAuthenticated, setIsAuthenticated] = useState(authAPI.isAuthenticated())
   const [authMode, setAuthMode] = useState('login') // 'login' | 'signup'
-  const [activeView, setActiveView] = useState('home')
+  const [activeView, setActiveView] = useState('home') // which page/view is shown
   const [isCustomizing, setIsCustomizing] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
-  const [messages, setMessages] = useState([])
+  const [messages, setMessages] = useState([]) // current chat messages
   const [inputValue, setInputValue] = useState('')
-  const [pastedContent, setPastedContent] = useState('')
-  const [activeChatId, setActiveChatId] = useState(null)
-  const [recents, setRecents] = useState([])
+  const [pastedContent, setPastedContent] = useState('') // large pasted text (shown as attachment)
+  const [activeChatId, setActiveChatId] = useState(null) // currently open session ID
+  const [recents, setRecents] = useState([]) // sidebar session list
   const [isLoading, setIsLoading] = useState(false)
   const [uploadedFiles, setUploadedFiles] = useState([])
   const [isUploadingFiles, setIsUploadingFiles] = useState(false)
@@ -39,6 +57,8 @@ function App() {
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [suggestionIndex, setSuggestionIndex] = useState(0)
   const [toast, setToast] = useState(null)
+  const [skills, setSkills] = useState([])
+  const [selectedSkillId, setSelectedSkillId] = useState(null)
   const userEmail = authAPI.getUserEmail() || ''
   const showToast = (message, type = 'info') => {
     setToast({ message, type })
@@ -87,6 +107,7 @@ function App() {
     if (isAuthenticated) {
       loadSessions()
       loadSavedPrompts()
+      loadSkills()
     }
   }, [isAuthenticated]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -136,6 +157,16 @@ function App() {
     }
   }
 
+  const loadSkills = async () => {
+    try {
+      const data = await chatAPI.getSkills()
+      const items = data?.skills || []
+      setSkills(items)
+    } catch (err) {
+      console.error('Failed to load skills:', err)
+    }
+  }
+
   const handleNavigate = async (view) => {
     if (view === 'home') {
       setActiveView('home')
@@ -156,11 +187,22 @@ function App() {
       setActiveView('prompts')
       setIsCustomizing(false)
       loadSavedPrompts()
+    } else if (view === 'customize') {
+      setActiveView('customize')
+      setIsCustomizing(true)
     } else {
+      if (view === activeChatIdRef.current) {
+        setActiveView('chat')
+        setIsCustomizing(false)
+        return
+      }
+
       setActiveView('chat')
       setActiveChatId(view)
       activeChatIdRef.current = view
       setIsCustomizing(false)
+      // Refresh skills whenever entering chat
+      loadSkills()
       try {
         const session = await chatAPI.getSession(view)
         const fileResponse = await chatAPI.getSessionFiles(view)
@@ -194,7 +236,7 @@ function App() {
       setActiveView('customize')
       setIsCustomizing(true)
     } else {
-      setActiveView('home')
+      setActiveView(activeChatIdRef.current ? 'chat' : 'home')
       setIsCustomizing(false)
     }
   }
@@ -469,6 +511,21 @@ function App() {
     setActiveView('chat')
     setIsLoading(true)
 
+    // Create session eagerly so it shows in recents immediately
+    let sessionId = activeChatIdRef.current
+    if (!sessionId) {
+      try {
+        const title = content.slice(0, 50)
+        const session = await chatAPI.createSession(title)
+        sessionId = session.id
+        setActiveChatId(sessionId)
+        activeChatIdRef.current = sessionId
+        setRecents((prev) => [{ id: sessionId, title, subtitle: '' }, ...prev])
+      } catch (err) {
+        console.error('Failed to pre-create session:', err)
+      }
+    }
+
     try {
       const socket = await ensureSocket()
       socket.send(
@@ -476,9 +533,10 @@ function App() {
           type: 'start',
           request_id: requestId,
           query: content,
-          session_id: activeChatIdRef.current,
-          create_new_session: !activeChatIdRef.current,
+          session_id: sessionId,
+          create_new_session: !sessionId,
           research_enabled: webSearchEnabled,
+          skill_id: selectedSkillId || undefined,
         }),
       )
     } catch (err) {
@@ -507,6 +565,20 @@ function App() {
         request_id: requestId,
       }),
     )
+  }
+
+  const handleRetry = (msgIndex) => {
+    if (isLoading) return
+    let userMsg = null
+    for (let i = msgIndex - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        userMsg = messages[i].content
+        break
+      }
+    }
+    if (userMsg) {
+      handleSendMessage(userMsg)
+    }
   }
 
   const handleQuickStart = (prompt) => {
@@ -730,16 +802,16 @@ function App() {
   if (!isAuthenticated) {
     if (authMode === 'login') {
       return (
-        <Login 
-          onSwitchToSignup={() => setAuthMode('signup')} 
-          onLoginSuccess={() => setIsAuthenticated(true)} 
+        <Login
+          onSwitchToSignup={() => setAuthMode('signup')}
+          onLoginSuccess={() => setIsAuthenticated(true)}
         />
       )
     } else {
       return (
-        <Signup 
-          onSwitchToLogin={() => setAuthMode('login')} 
-          onSignupSuccess={() => setIsAuthenticated(true)} 
+        <Signup
+          onSwitchToLogin={() => setAuthMode('login')}
+          onSignupSuccess={() => setIsAuthenticated(true)}
         />
       )
     }
@@ -753,8 +825,8 @@ function App() {
           <span>{toast.message}</span>
         </div>
       )}
-      <Sidebar 
-        onNavigate={handleNavigate} 
+      <Sidebar
+        onNavigate={handleNavigate}
         activeView={activeView}
         activeChatId={activeChatId}
         onToggleCustomize={handleToggleCustomize}
@@ -768,21 +840,22 @@ function App() {
         userEmail={userEmail}
       />
 
-      {isCustomizing && (
-        <CustomizePanel 
-          onClose={() => {
-            setIsCustomizing(false)
-            setActiveView('home')
-          }} 
-          onNavigate={handleNavigate}
-        />
-      )}
-      
+        {isCustomizing && (
+          <CustomizePanel
+            onClose={() => {
+              setIsCustomizing(false)
+              setActiveView('home')
+            }}
+            onNavigate={handleNavigate}
+            activeView={activeView}
+          />
+        )}
+
       <main className="main-content">
         <TopBar />
         <div className="view-container">
           {activeView === 'home' && (
-            <HomeView 
+            <HomeView
               onSendMessage={handleSendMessage}
               inputValue={inputValue}
               setInputValue={setInputValue}
@@ -799,7 +872,7 @@ function App() {
             />
           )}
           {activeView === 'chat' && (
-            <ChatView 
+            <ChatView
               messages={messages}
               onSendMessage={handleSendMessage}
               inputValue={inputValue}
@@ -810,6 +883,7 @@ function App() {
               longPasteThreshold={LONG_PASTE_THRESHOLD}
               isLoading={isLoading}
               onStopGenerating={handleStopGenerating}
+              onRetry={handleRetry}
               onUploadFiles={handleUploadFiles}
               onRemoveFile={handleRemoveUploadedFile}
               onRemoveAllFiles={handleRemoveAllUploadedFiles}
@@ -822,6 +896,9 @@ function App() {
               removingFileIds={removingFileIds}
               openingFileIds={openingFileIds}
               showToast={showToast}
+              skills={skills}
+              selectedSkillId={selectedSkillId}
+              onSelectSkill={setSelectedSkillId}
             />
           )}
           {activeView === 'skills' && (
@@ -842,8 +919,8 @@ function App() {
           <div className="command-suggestions">
             <div className="suggestions-header">Commands</div>
             {filteredSuggestions.map((s, idx) => (
-              <div 
-                key={s.id} 
+              <div
+                key={s.id}
                 className={`suggestion-item ${idx === suggestionIndex ? 'active' : ''}`}
                 onClick={() => handleSelectSuggestion(s)}
               >
@@ -857,9 +934,7 @@ function App() {
           </div>
         )}
 
-        <div className="footer-warning">
-          AXIOM can make mistakes. Verify important information.
-        </div>
+        
       </main>
     </div>
   )

@@ -1109,3 +1109,236 @@
     transform: rotate(360deg);
   }
 }
+
+/* Skill Selector */
+.skill-selector {
+  position: relative;
+}
+
+.skill-dropdown {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  min-width: 160px;
+  background: #1a1d23;
+  border: 2px solid #000;
+  box-shadow: 4px 4px 0 #000;
+  z-index: 200;
+  border-radius: 2px;
+}
+
+.skill-dropdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #c9cdd5;
+  cursor: pointer;
+  gap: 8px;
+}
+
+.skill-dropdown-item:hover {
+  background: #24282f;
+  color: #fff;
+}
+
+.skill-dropdown-item.active {
+  color: #fff;
+  background: #2a2e36;
+}
+
+/* Active skill badge in input row */
+.active-skill-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 3px 6px;
+  background: #111;
+  border: 2px solid #000;
+  box-shadow: 2px 2px 0 #000;
+  border-radius: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.active-skill-clear {
+  display: flex;
+  align-items: center;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 2px;
+  cursor: pointer;
+  color: #9aa0aa;
+  line-height: 1;
+}
+
+.active-skill-clear:hover {
+  color: #fff;
+}
+
+
+/* Skill used badge on assistant message */
+.skill-used-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 3px 10px 3px 8px;
+  background: #111;
+  border: 2px solid #000;
+  box-shadow: 2px 2px 0 #000;
+  border-radius: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.skill-used-label {
+  color: #9aa0aa;
+}
+
+.skill-used-chip {
+  color: #fff;
+  background: #2a2e36;
+  padding: 1px 6px;
+  border-radius: 2px;
+}
+
+
+/* Live Preview Canvas */
+.preview-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(4px);
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-panel {
+  width: min(1200px, 95vw);
+  height: min(820px, 92vh);
+  background: #16181d;
+  border: 1px solid #2e3138;
+  box-shadow: 0 32px 80px rgba(0,0,0,0.6), 0 0 0 1px #000;
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.preview-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  border-bottom: 1px solid #2e3138;
+  background: #1c1f26;
+  min-height: 46px;
+  gap: 12px;
+}
+
+.preview-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 120px;
+}
+
+.preview-traffic-lights {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tl {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+  cursor: pointer;
+}
+.tl-red    { background: #ff5f57; }
+.tl-yellow { background: #ffbd2e; }
+.tl-green  { background: #28c840; }
+
+.preview-panel-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #6b7280;
+}
+
+.preview-device-switcher {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: #111317;
+  border: 1px solid #2e3138;
+  border-radius: 6px;
+  padding: 3px;
+}
+
+.preview-header-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 120px;
+  justify-content: flex-end;
+}
+
+.preview-device-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #6b7280;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.preview-device-btn:hover { background: #2e3138; color: #e5e7eb; }
+.preview-device-btn.active { background: #2e3138; color: #fff; }
+
+.preview-canvas-area {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f1014;
+  overflow: auto;
+  padding: 24px;
+}
+
+.preview-frame-wrap {
+  background: #fff;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px #2e3138, 0 16px 48px rgba(0,0,0,0.5);
+  transition: width 0.25s ease, height 0.25s ease;
+}
+
+.preview-desktop { width: 100%; height: calc(min(820px, 92vh) - 94px); }
+.preview-tablet  { width: 768px;  height: 600px; }
+.preview-mobile  { width: 390px;  height: 680px; border-radius: 20px; box-shadow: 0 0 0 8px #2e3138, 0 16px 48px rgba(0,0,0,0.5); }
+
+.preview-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+}

@@ -1,13 +1,29 @@
+/**
+ * api.js - API service layer for the Horizon frontend.
+ * 
+ * Exports:
+ * - authAPI: signup, login, logout, token management
+ * - chatAPI: session CRUD, memory, skills, saved prompts, PDF export
+ * - searchAPI: REST-based search (alternative to WebSocket)
+ * - wsChatAPI: WebSocket connection factory for real-time streaming
+ * - documentAPI: file upload/remove/preview with progress tracking
+ * 
+ * All authenticated requests include JWT token from localStorage.
+ * Handles token expiry by clearing storage and returning AUTH_SESSION_EXPIRED.
+ */
+
 export const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-export const WS_BASE = API_BASE.replace(/^http/i, 'ws')
+export const WS_BASE = API_BASE.replace(/^http/i, 'ws') // convert http(s) to ws(s)
 export const AUTH_SESSION_EXPIRED = 'SESSION_EXPIRED'
 
+// Clear all auth data from localStorage on logout or token expiry
 const clearAuthStorage = () => {
   localStorage.removeItem('token')
   localStorage.removeItem('userEmail')
   localStorage.removeItem('userName')
 }
 
+// Decode JWT payload without a library (just base64 decode the middle part)
 const parseJwtPayload = (token) => {
   try {
     const [, payload] = String(token || '').split('.')
@@ -20,6 +36,7 @@ const parseJwtPayload = (token) => {
   }
 }
 
+// Check if stored token is still valid (not expired)
 const getValidToken = () => {
   const token = localStorage.getItem('token')
   if (!token) return null
@@ -33,11 +50,13 @@ const getValidToken = () => {
   return token
 }
 
+// Build Authorization header if token is valid
 const getAuthHeaders = () => {
   const token = getValidToken()
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+// Parse error response; handle 401 by clearing auth
 const parseError = async (res, fallback) => {
   if (res.status === 401) {
     clearAuthStorage()
@@ -252,6 +271,21 @@ export const chatAPI = {
     return res.json()
   },
 
+  createMemory: async (key, value) => {
+    const res = await fetch(`${API_BASE}/v1/chat/memory`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify({ key, value }),
+    })
+    if (!res.ok) {
+      throw new Error(await parseError(res, 'Failed to save memory'))
+    }
+    return res.json()
+  },
+
   deleteMemory: async (memoryId) => {
     const res = await fetch(`${API_BASE}/v1/chat/memory/${encodeURIComponent(memoryId)}`, {
       method: 'DELETE',
@@ -270,6 +304,68 @@ export const chatAPI = {
     if (!res.ok) {
       throw new Error(await parseError(res, 'Failed to clear memories'))
     }
+  },
+
+  getSkills: async () => {
+    const res = await fetch(`${API_BASE}/v1/chat/skills`, {
+      headers: { ...getAuthHeaders() },
+    })
+    if (!res.ok) {
+      throw new Error(await parseError(res, 'Failed to get skills'))
+    }
+    return res.json()
+  },
+
+  createSkill: async (definition, enabled = true) => {
+    const res = await fetch(`${API_BASE}/v1/chat/skills`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify({ definition, enabled }),
+    })
+    if (!res.ok) {
+      throw new Error(await parseError(res, 'Failed to create skill'))
+    }
+    return res.json()
+  },
+
+  updateSkill: async (skillId, payload) => {
+    const res = await fetch(`${API_BASE}/v1/chat/skills/${encodeURIComponent(skillId)}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      throw new Error(await parseError(res, 'Failed to update skill'))
+    }
+    return res.json()
+  },
+
+  deleteSkill: async (skillId) => {
+    const res = await fetch(`${API_BASE}/v1/chat/skills/${encodeURIComponent(skillId)}`, {
+      method: 'DELETE',
+      headers: { ...getAuthHeaders() },
+    })
+    if (!res.ok) {
+      throw new Error(await parseError(res, 'Failed to delete skill'))
+    }
+  },
+
+  exportPdf: async (content, title = 'Report') => {
+    const res = await fetch(`${API_BASE}/v1/chat/export-pdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      body: JSON.stringify({ content, title }),
+    })
+    if (!res.ok) {
+      throw new Error(await parseError(res, 'Failed to export PDF'))
+    }
+    return res.json()
   },
 }
 

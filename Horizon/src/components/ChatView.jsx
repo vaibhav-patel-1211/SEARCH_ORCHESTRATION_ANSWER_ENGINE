@@ -1,8 +1,27 @@
-import { Paperclip, Globe, ArrowUp, Copy, ThumbsUp, ThumbsDown, RotateCcw, Download, Loader2, Square, X, Check, Info } from 'lucide-react'
+/**
+ * ChatView.jsx - Main chat interface component.
+ * 
+ * Handles:
+ * - Message display with markdown rendering (ReactMarkdown + GFM)
+ * - Real-time streaming text display
+ * - File upload UI (drag & drop, progress bar)
+ * - Input area with auto-resize textarea
+ * - Web search toggle
+ * - Skill selection dropdown
+ * - File preview modal
+ * - Copy/export actions on messages
+ * - Auto-scroll to bottom on new messages
+ * 
+ * Receives messages and callbacks from App.jsx (parent).
+ * The actual WebSocket logic lives in App.jsx; this component
+ * only handles the visual presentation.
+ */
+
+import { Paperclip, Globe, ArrowUp, Copy, RotateCcw, Download, Loader2, Square, X, Check, Info, Zap, Monitor, Smartphone, Tablet, RefreshCw, FileText } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { API_BASE } from '../services/api'
+import { API_BASE, chatAPI } from '../services/api'
 import './ChatView.css'
 
 function ChatView({
@@ -16,6 +35,7 @@ function ChatView({
   longPasteThreshold = 220,
   isLoading,
   onStopGenerating,
+  onRetry,
   onUploadFiles,
   onRemoveFile,
   onRemoveAllFiles,
@@ -28,15 +48,47 @@ function ChatView({
   removingFileIds,
   openingFileIds,
   showToast,
+  skills = [],
+  selectedSkillId,
+  onSelectSkill,
 }) {
   const messagesEndRef = useRef(null)
   const chatContentRef = useRef(null)
   const fileInputRef = useRef(null)
+  const skillDropdownRef = useRef(null)
+  const textareaRef = useRef(null)
   const [isAtBottom, setIsAtBottom] = useState(true)
   const [isFilePreviewOpen, setIsFilePreviewOpen] = useState(false)
   const [isFilePreviewLoading, setIsFilePreviewLoading] = useState(false)
   const [isPastedPreviewOpen, setIsPastedPreviewOpen] = useState(false)
   const [filePreview, setFilePreview] = useState(null)
+  const [skillDropdownOpen, setSkillDropdownOpen] = useState(false)
+  const [previewMsg, setPreviewMsg] = useState(null)
+  const [previewDevice, setPreviewDevice] = useState('desktop')
+  const [previewKey, setPreviewKey] = useState(0)
+  const [exportingIdx, setExportingIdx] = useState(null)
+
+  const selectedSkill = skills.find((s) => s.id === selectedSkillId) || null
+
+  // Close skill dropdown on outside click
+  useEffect(() => {
+    if (!skillDropdownOpen) return
+    const handler = (e) => {
+      if (skillDropdownRef.current && !skillDropdownRef.current.contains(e.target)) {
+        setSkillDropdownOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [skillDropdownOpen])
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [inputValue])
   const openingFileIdSet = new Set(openingFileIds || [])
   const hasPastedContent = Boolean(String(pastedContent || '').trim())
   const canSend = Boolean(inputValue.trim() || hasPastedContent)
@@ -181,6 +233,7 @@ function ChatView({
     web_search: 'Web search',
     retrieval_route: 'Retrieval route',
     retrieval_sources: 'Source retrieval',
+    skill_match: 'Skill match',
   }
 
   const renderThinkingPayload = (step) => {
@@ -256,7 +309,107 @@ function ChatView({
       )
     }
 
+    if (step.name === 'skill_match') {
+      const skills = Array.isArray(payload.skills) ? payload.skills : []
+      return (
+        <div className="thinking-step-body">
+          <div className="thinking-chip-list">
+            {skills.length > 0 ? (
+              skills.map((skill, index) => (
+                <span key={`${skill?.id || skill?.name || index}`} className="thinking-chip">
+                  {skill?.name || 'Skill'}
+                </span>
+              ))
+            ) : (
+              <span className="thinking-chip">Matched skill</span>
+            )}
+          </div>
+        </div>
+      )
+    }
+
     return null
+  }
+
+  const PREVIEW_LANGS = new Set(['html', 'css', 'js', 'javascript', 'jsx', 'tsx', 'react', 'typescript', 'ts'])
+
+  const extractCodeBlocks = (content) => {
+    const blocks = []
+    const re = /```([\w-]*)\n([\s\S]*?)```/g
+    let m
+    while ((m = re.exec(content)) !== null) {
+      const lang = (m[1] || '').toLowerCase()
+      blocks.push({ lang, code: m[2] })
+    }
+    return blocks
+  }
+
+  const buildPreviewSrcdoc = (content) => {
+    const blocks = extractCodeBlocks(content)
+    let html = '', css = '', js = ''
+    let isReact = false
+
+    for (const { lang, code } of blocks) {
+      if (lang === 'html') html = code
+      else if (lang === 'css') css = code
+      else if (['js', 'javascript'].includes(lang)) js = code
+      else if (['jsx', 'tsx', 'react'].includes(lang)) { js = code; isReact = true }
+    }
+
+    // If single block with no explicit lang, try to detect
+    if (!html && !js && blocks.length === 1) {
+      const { lang, code } = blocks[0]
+      if (!lang || PREVIEW_LANGS.has(lang)) {
+        if (code.includes('<') && code.includes('>')) html = code
+        else js = code
+      }
+    }
+
+    const babelScript = isReact
+      ? `<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>`
+      : ''
+    const scriptType = isReact ? 'type="text/babel"' : ''
+    const reactImport = isReact
+      ? `<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+         <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>`
+      : ''
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+${reactImport}
+${babelScript}
+<style>*{box-sizing:border-box}body{margin:0;font-family:sans-serif}${css}</style>
+</head>
+<body>
+${html || '<div id="root"></div>'}
+${js ? `<script ${scriptType}>${js}</script>` : ''}
+</body>
+</html>`
+  }
+
+  const msgHasPreview = (content) => {
+    const blocks = extractCodeBlocks(content)
+    return blocks.some(({ lang }) => PREVIEW_LANGS.has(lang)) ||
+      (blocks.length === 1 && !blocks[0].lang && blocks[0].code.includes('<'))
+  }
+
+  const renderSkillBadge = (msg) => {
+    const steps = Array.isArray(msg?.thinkingSteps) ? msg.thinkingSteps : []
+    const skillStep = steps.find((s) => s?.name === 'skill_match')
+    if (!skillStep) return null
+    const skillNames = (skillStep.payload?.skills || []).map((s) => s?.name).filter(Boolean)
+    if (skillNames.length === 0) return null
+    return (
+      <div className="skill-used-badge">
+        <span className="skill-used-label">Skill</span>
+        {skillNames.map((name) => (
+          <span key={name} className="skill-used-chip">{name}</span>
+        ))}
+      </div>
+    )
   }
 
   const renderThinkingPanel = (msg) => {
@@ -268,8 +421,10 @@ function ChatView({
     const resolvedIntent =
       (typeof msg?.intent === 'string' && msg.intent) ||
       (typeof stepIntent === 'string' ? stepIntent : '')
-    const showThinking = Boolean(msg?.researchEnabled) || resolvedIntent === 'coding'
-    if (!showThinking || resolvedIntent === 'general') return null
+    const hasSkillMatch = steps.some((step) => step?.name === 'skill_match')
+    const showThinking = Boolean(msg?.researchEnabled) || resolvedIntent === 'coding' || hasSkillMatch
+    if (!showThinking) return null
+    if (resolvedIntent === 'general' && !hasSkillMatch) return null
 
     const codingMode = steps.some(
       (step) => step?.name === 'query_understanding' && step?.payload?.intent === 'coding',
@@ -387,6 +542,7 @@ function ChatView({
             >
               <div className={`${msg.role}-message`}>
                 {renderContextBadge(msg.activeFiles)}
+                {msg.role === 'assistant' && renderSkillBadge(msg)}
                 {msg.role === 'assistant' && progressState && renderResearchProgress(progressState)}
                 {msg.role === 'assistant' && renderThinkingPanel(msg)}
                 <div className="message-text markdown-content">
@@ -452,7 +608,13 @@ function ChatView({
                 {msg.role === 'assistant' && msg.isStreaming && (
                   <div className="loading-indicator" style={{ marginTop: msg.content ? '16px' : '0' }}>
                     <Loader2 size={18} className="spin" />
-                    <span>{msg.hasAnswerStarted ? 'Generating answer...' : 'Researching...'}</span>
+                    <span>
+                      {msg.hasAnswerStarted
+                        ? 'Generating answer...'
+                        : msg?.researchEnabled
+                          ? 'Researching...'
+                          : 'Thinking...'}
+                    </span>
                   </div>
                 )}
               </div>
@@ -460,9 +622,33 @@ function ChatView({
               {msg.role === 'assistant' && !msg.isStreaming && (
                 <div className="message-actions">
                   <button className="icon-btn" onClick={() => handleCopy(msg.content)} title="Copy"><Copy size={14} /></button>
-                  <button className="icon-btn" onClick={() => handleAction('Like')} title="Like"><ThumbsUp size={14} /></button>
-                  <button className="icon-btn" onClick={() => handleAction('Dislike')} title="Dislike"><ThumbsDown size={14} /></button>
-                  <button className="icon-btn" onClick={() => handleAction('Retry')} title="Retry"><RotateCcw size={14} /></button>
+                  <button className="icon-btn" onClick={() => onRetry ? onRetry(idx) : handleAction('Retry')} title="Retry"><RotateCcw size={14} /></button>
+                  {msgHasPreview(msg.content) && (
+                    <button className="icon-btn" onClick={() => setPreviewMsg(msg)} title="Preview"><Monitor size={14} /></button>
+                  )}
+                  <button
+                    className="icon-btn"
+                    disabled={exportingIdx === idx}
+                    title="Export as PDF"
+                    onClick={async () => {
+                      setExportingIdx(idx)
+                      try {
+                        const { download_url } = await chatAPI.exportPdf(msg.content, messages.find((m, i) => i < idx && m.role === 'user')?.content?.slice(0, 60) || 'Report')
+                        const a = document.createElement('a')
+                        a.href = `${API_BASE}${download_url}`
+                        a.download = download_url.split('/').pop()
+                        document.body.appendChild(a)
+                        a.click()
+                        document.body.removeChild(a)
+                      } catch (e) {
+                        showToast('PDF export failed', 'info')
+                      } finally {
+                        setExportingIdx(null)
+                      }
+                    }}
+                  >
+                    {exportingIdx === idx ? <Loader2 size={14} className="spin" /> : <FileText size={14} />}
+                  </button>
                 </div>
               )}
             </div>
@@ -570,7 +756,53 @@ function ChatView({
             >
               <Globe size={20} />
             </button>
+            {skills.length > 0 && (
+              <div className="skill-selector" ref={skillDropdownRef}>
+                <button
+                  className={`icon-btn ${selectedSkillId ? 'active' : ''}`}
+                  onClick={() => setSkillDropdownOpen((prev) => !prev)}
+                  title={selectedSkill ? `Skill: ${selectedSkill.name}` : 'Select skill'}
+                >
+                  <Zap size={20} />
+                </button>
+                {skillDropdownOpen && (
+                  <div className="skill-dropdown">
+                    <div
+                      className={`skill-dropdown-item ${!selectedSkillId ? 'active' : ''}`}
+                      onClick={() => { onSelectSkill(null); setSkillDropdownOpen(false) }}
+                    >
+                      <span>None</span>
+                      {!selectedSkillId && <Check size={12} />}
+                    </div>
+                    {skills.filter((s) => s.enabled !== false).map((skill) => (
+                      <div
+                        key={skill.id}
+                        className={`skill-dropdown-item ${selectedSkillId === skill.id ? 'active' : ''}`}
+                        onClick={() => { onSelectSkill(skill.id); setSkillDropdownOpen(false) }}
+                      >
+                        <span>{skill.name}</span>
+                        {selectedSkillId === skill.id && <Check size={12} />}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {selectedSkill && (
+              <div className="active-skill-badge">
+                <Zap size={11} />
+                <span>{selectedSkill.name}</span>
+                <button
+                  className="active-skill-clear"
+                  onClick={() => onSelectSkill(null)}
+                  title="Clear skill"
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            )}
             <textarea
+              ref={textareaRef}
               placeholder="Ask anything..."
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
@@ -582,6 +814,7 @@ function ChatView({
                 }
               }}
               rows={1}
+              style={{ overflowY: 'auto', maxHeight: '200px', resize: 'none' }}
             />
             <div className="input-actions">
               {isLoading ? (
@@ -686,6 +919,43 @@ function ChatView({
               </article>
             </div>
           </aside>
+        </div>
+      )}
+
+      {previewMsg && (
+        <div className="preview-backdrop" onClick={() => setPreviewMsg(null)}>
+          <div className="preview-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="preview-panel-header">
+              <div className="preview-header-left">
+                <div className="preview-traffic-lights">
+                  <span className="tl tl-red" onClick={() => setPreviewMsg(null)} />
+                  <span className="tl tl-yellow" />
+                  <span className="tl tl-green" />
+                </div>
+                <span className="preview-panel-title">Live Preview</span>
+              </div>
+              <div className="preview-device-switcher">
+                <button className={`preview-device-btn ${previewDevice === 'desktop' ? 'active' : ''}`} onClick={() => setPreviewDevice('desktop')} title="Desktop"><Monitor size={14} /></button>
+                <button className={`preview-device-btn ${previewDevice === 'tablet' ? 'active' : ''}`} onClick={() => setPreviewDevice('tablet')} title="Tablet"><Tablet size={14} /></button>
+                <button className={`preview-device-btn ${previewDevice === 'mobile' ? 'active' : ''}`} onClick={() => setPreviewDevice('mobile')} title="Mobile"><Smartphone size={14} /></button>
+              </div>
+              <div className="preview-header-right">
+                <button className="preview-device-btn" onClick={() => setPreviewKey((k) => k + 1)} title="Refresh"><RefreshCw size={13} /></button>
+                <button className="preview-device-btn" onClick={() => setPreviewMsg(null)} title="Close"><X size={15} /></button>
+              </div>
+            </div>
+            <div className="preview-canvas-area">
+              <div className={`preview-frame-wrap preview-${previewDevice}`}>
+                <iframe
+                  key={previewKey}
+                  className="preview-iframe"
+                  sandbox="allow-scripts allow-same-origin"
+                  srcDoc={buildPreviewSrcdoc(previewMsg.content)}
+                  title="Live Preview"
+                />
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
