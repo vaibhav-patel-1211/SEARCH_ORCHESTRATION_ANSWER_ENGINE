@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, status
 from typing import List
+from pydantic import BaseModel
 from schemas.chat_schema import (
     CreateSessionRequest,
     AddMessageRequest,
@@ -10,11 +11,16 @@ from schemas.chat_schema import (
     OptimizePromptRequest,
     OptimizePromptResponse,
     SavedPrompt,
+    CreateMemoryRequest,
     CreateSavedPromptRequest,
     MemoryItem,
     MemoryListResponse,
     MemorySettingsResponse,
     UpdateMemorySettingsRequest,
+    Skill,
+    SkillListResponse,
+    CreateSkillRequest,
+    UpdateSkillRequest,
 )
 from schemas.document_schema import SessionFilesResponse, UploadedFileMetadata
 from database.local.client import (
@@ -33,11 +39,18 @@ from database.local.client import (
     get_memory_enabled,
     set_memory_enabled,
     get_user_memories,
+    upsert_user_memory,
     delete_user_memory,
     clear_user_memories,
+    get_user_skills,
+    create_user_skill,
+    update_user_skill,
+    delete_user_skill,
 )
 from utils.auth_utils import verify_access_token
 from config import model
+from app.services.user_memory import _normalize_key
+from app.services.skills import parse_skill_definition
 
 router = APIRouter(prefix="/v1/chat", tags=["Chat"])
 
@@ -255,6 +268,38 @@ async def list_memories(user_email: str = Depends(get_current_user_email)):
     )
 
 
+@router.post(
+    "/memory",
+    response_model=MemoryItem,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_memory_item(
+    request: CreateMemoryRequest,
+    user_email: str = Depends(get_current_user_email),
+):
+    raw_key = (request.key or "").strip()
+    raw_value = (request.value or "").strip()
+    if not raw_key or not raw_value:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Memory key and value are required.",
+        )
+
+    normalized_key = _normalize_key(raw_key)
+    if not normalized_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Memory key is invalid.",
+        )
+
+    stored = await upsert_user_memory(
+        user_id=user_email,
+        key=normalized_key,
+        value=raw_value,
+    )
+    return MemoryItem(**stored)
+
+
 @router.delete("/memory/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_memory_item(
     memory_id: str,
@@ -273,3 +318,106 @@ async def delete_memory_item(
 async def clear_memories(user_email: str = Depends(get_current_user_email)):
     await clear_user_memories(user_email)
     return None
+
+
+@router.get("/skills", response_model=SkillListResponse)
+async def list_skills(user_email: str = Depends(get_current_user_email)):
+    skills = await get_user_skills(user_email, limit=200)
+    return SkillListResponse(
+        skills=[Skill(**item) for item in skills],
+        total=len(skills),
+    )
+
+
+@router.post("/skills", response_model=Skill, status_code=status.HTTP_201_CREATED)
+async def create_skill(
+    request: CreateSkillRequest, user_email: str = Depends(get_current_user_email)
+):
+    parsed = parse_skill_definition(request.definition)
+    if not parsed.get("name"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Skill name is required in the definition.",
+        )
+    if not parsed.get("prompt"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Skill prompt is required in the definition.",
+        )
+
+    parsed["enabled"] = bool(request.enabled)
+    stored = await create_user_skill(user_email, parsed)
+    return Skill(**stored)
+
+
+@router.put("/skills/{skill_id}", response_model=Skill)
+async def update_skill(
+    skill_id: str,
+    request: UpdateSkillRequest,
+    user_email: str = Depends(get_current_user_email),
+):
+    update_fields: dict[str, object] = {}
+    if request.definition is not None:
+        parsed = parse_skill_definition(request.definition)
+        if not parsed.get("name"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Skill name is required in the definition.",
+            )
+        if not parsed.get("prompt"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Skill prompt is required in the definition.",
+            )
+        update_fields.update(parsed)
+    if request.enabled is not None:
+        update_fields["enabled"] = bool(request.enabled)
+
+    if not update_fields:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No skill updates provided.",
+        )
+
+    updated = await update_user_skill(user_email, skill_id, update_fields)
+    if not updated:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Skill not found"
+        )
+    return Skill(**updated)
+
+
+@router.delete("/skills/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_skill(
+    skill_id: str, user_email: str = Depends(get_current_user_email)
+):
+    deleted = await delete_user_skill(user_email, skill_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Skill not found"
+        )
+    return None
+
+
+class ExportPdfRequest(BaseModel):
+    content: str
+    title: str = "Report"
+
+
+@router.post("/export-pdf")
+async def export_pdf(
+    request: ExportPdfRequest,
+    user_email: str = Depends(get_current_user_email),
+):
+    """Generate a PDF from arbitrary markdown content on-demand."""
+    import asyncio
+    from graph.steps.generate_pdf import generate_pdf_node
+
+    state = {"prompt": request.title, "final_answer": request.content}
+    result = await asyncio.to_thread(generate_pdf_node, state)
+
+    filename = result.get("pdf_filename")
+    if not filename:
+        raise HTTPException(status_code=500, detail="PDF generation failed.")
+
+    return {"download_url": f"/v1/download/{filename}"}

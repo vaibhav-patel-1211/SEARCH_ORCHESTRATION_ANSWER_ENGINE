@@ -73,6 +73,11 @@ class MemoryItem(BaseModel):
     updated_at: datetime | None = None
 
 
+class CreateMemoryRequest(BaseModel):
+    key: str
+    value: str
+
+
 class MemoryListResponse(BaseModel):
     memories: List[MemoryItem]
     total: int
@@ -84,3 +89,30 @@ class MemorySettingsResponse(BaseModel):
 
 class UpdateMemorySettingsRequest(BaseModel):
     enabled: bool
+
+
+class Skill(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    triggers: List[str] = Field(default_factory=list)
+    prompt: str
+    definition: str
+    enabled: bool = True
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class SkillListResponse(BaseModel):
+    skills: List[Skill]
+    total: int
+
+
+class CreateSkillRequest(BaseModel):
+    definition: str
+    enabled: bool = True
+
+
+class UpdateSkillRequest(BaseModel):
+    definition: str | None = None
+    enabled: bool | None = None
